@@ -12,7 +12,6 @@ from udacidrone.connection import MavlinkConnection
 from udacidrone.messaging import MsgID
 from udacidrone.frame_utils import global_to_local
 import pkg_resources
-# pkg_resources.require("networkx==2.1")
 import networkx as nx
 
 class States(Enum):
@@ -82,7 +81,8 @@ class MotionPlanning(Drone):
 
     def takeoff_transition(self):
         self.flight_state = States.TAKEOFF
-        print("takeoff transition")
+        print('takeoff transition to ({0}, {1}, {2})'.format(self.local_position[0], self.local_position[1], self.target_position[2]))
+        print('Target position ({0}, {1}, {2})'.format(self.target_position[0], self.target_position[1], self.target_position[2]))
         self.takeoff(self.target_position[2])
 
     def waypoint_transition(self):
@@ -125,10 +125,8 @@ class MotionPlanning(Drone):
         colliders = open('colliders.csv', 'r')
         _, lat, _, lon = colliders.readline().replace(',', ' ') .split()
         lat0, lon0 = float(lat), float(lon)            
-        self.set_home_position(lon0, lat0, 0.0)
+        self.set_home_position(lon0, lat0, 0)
         
-        # retrieve current global position
-        # convert to current local position using global_to_local()
         local_pos = global_to_local(self.global_position, self.global_home)
         print('local pos {0}'.format(local_pos))
 
@@ -142,58 +140,38 @@ class MotionPlanning(Drone):
         # Define a grid for a particular altitude and safety margin around obstacles
         grid, north_offset, east_offset, edges = create_grid_and_edges(data, TARGET_ALTITUDE, SAFETY_DISTANCE)
         print("North offset = {0}, east offset = {1}".format(north_offset, east_offset))
-
-        # Define starting point on the grid (this is just grid center)
-        # grid_start = (-north_offset, -east_offset)
-        # Convert start position to current position rather than map center
-        # grid_start = (local_pos[0] - north_offset, local_pos[1] - east_offset)
-        grid_start = (local_pos[0], local_pos[1])
+        start = (-north_offset + local_pos[0], -east_offset + local_pos[1])
        
-        # Set goal as some arbitrary position on the grid
-        # grid_goal = (-north_offset + 10, -east_offset + 10)
-
-        # TODO: adapt to set goal as latitude / longitude position and convert
-
-        # Run A* to find a path from start to goal        
-        # TODO: add diagonal motions with a cost of sqrt(2) to your A* implementation
-        #       or move to a different search space such as a graph (not done here)
-        # path, _ = a_star(grid, heuristic, grid_start, grid_goal)
+        min_node = np.array(edges[0][0])
+        min_dist = LA.norm(np.array(start) - np.array(min_node))
+        p0 = np.array(start)
         G = nx.Graph()
+        for i in range(len(edges)):
+            p1 = np.array(edges[i][0])
+            p2 = np.array(edges[i][1])
+            hit = check_hit(grid, p0, p1)
+            if hit == False and min_dist > LA.norm(p0 - p1):
+                min_dist = LA.norm(p0 - np.array(p1))
+                min_node = (p1[0], p1[1])
+            if hit == False and min_dist > LA.norm(p0 - p2):
+                min_dist = LA.norm(p0 - np.array(p2))
+                min_node = (p2[0], p2[1])
 
-        min_node = edges[0][0]
-        min_dist = LA.norm(np.array(grid_start) - np.array(min_node))
-
-        p0 = np.array(grid_start)
+        edges.insert(0, (start, min_node))
         for i in range(len(edges)):
             e = edges[i]
-            p1 = e[0]
-            p2 = e[1]
-            print('edge ', i)
-            print('p1 ', p1)
-            print('p2 ', p2)
-            hit = check_hit(grid, grid_start, p2)
-            if hit == False and min_dist > LA.norm(p0 - np.array(p2)):
-                min_dist = LA.norm(p0 - np.array(p2))
-                min_node = p2
-
-            dist = LA.norm(np.array(p2) - np.array(p1))
-            G.add_edge(p1, p2, weight=dist)
-
-        edges.insert(0, (grid_start, min_node))
-        G.add_edge(grid_start, min_node, weight=min_dist)
+            # print('edge {0}, {1} --> {2}'.format(i, e[0], e[1]))
+            G.add_edge(e[0], e[1])
 
         path = []
         while (len(path) < 1):
             k = np.random.randint(1,len(edges))
-            drone_goal = (edges[k][0][0], edges[k][0][1])
-            print('Local Start and Goal: ', grid_start, drone_goal)
-            path, _ = a_star2(G, heuristic, grid_start, drone_goal)
+            goal = (edges[k][0][0], edges[k][0][1])
+            print('Local Start and Goal: ', start, goal)
+            path, _ = a_star2(G, heuristic, start, goal)
             
-        # TODO: prune path to minimize number of waypoints
-        # TODO (if you're feeling ambitious): Try a different approach altogether!
-
         # Convert path to waypoints
-        waypoints = [[p[0] + north_offset, p[1] + east_offset, TARGET_ALTITUDE, 0] for p in path]
+        waypoints = [[ int(p[0] + north_offset), int(p[1] + east_offset), TARGET_ALTITUDE, 0] for p in path]
         for wp in waypoints:
             print('north: ', wp[0], 'east: ', wp[1])
 

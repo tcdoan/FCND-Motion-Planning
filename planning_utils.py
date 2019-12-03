@@ -3,6 +3,7 @@ from queue import PriorityQueue
 from bresenham import bresenham
 from scipy.spatial import Voronoi, voronoi_plot_2d
 import numpy as np
+import numpy.linalg as LA
 
 def create_grid_and_edges(data, drone_altitude, safety_distance):
     """
@@ -55,9 +56,6 @@ def create_grid_and_edges(data, drone_altitude, safety_distance):
     for v in graph.ridge_vertices:
         v1 = graph.vertices[v[0]]
         v2 = graph.vertices[v[1]]
-        if np.amin(v1) < 0 or np.amin(v2)< 0 or v1[0] > grid.shape[0] or v1[1] > grid.shape[1] or v2[0] > grid.shape[0] or v2[1] > grid.shape[1]:
-            continue
-        
         hit = check_hit(grid, v1, v2)
         if not hit:
             edge = (tuple(v1), tuple(v2))
@@ -70,13 +68,11 @@ def check_hit(grid, v1, v2):
         return True
     
     bpoints = list(bresenham(int(v1[0]), int(v1[1]), int(v2[0]), int(v2[1])))
-    hit = False
     for p in bpoints:
         if grid[p[0], p[1]] == 1:
-            hit = True
-            break
+            return True
 
-    return hit
+    return False
 
 def a_star2(G, h, s, goal):
     queue = PriorityQueue()
@@ -97,8 +93,8 @@ def a_star2(G, h, s, goal):
             found = True
             break
         else:
-            for y in G.neighbors(x):
-                cost = accum_cost + G[x][y]['weight']
+            for y in G[x]:
+                cost = accum_cost + h(x, y)
                 est_cost = cost + h(y, goal)
                 
                 if y not in visited:
@@ -121,7 +117,5 @@ def a_star2(G, h, s, goal):
         print('Failed to find path!')
     return path[::-1], cost
 
-
 def heuristic(position, goal_position):
     return np.linalg.norm(np.array(position) - np.array(goal_position))
-
