@@ -74,7 +74,7 @@ def check_hit(grid, v1, v2):
 
     return False
 
-def a_star2(G, h, s, goal):
+def a_star(G, h, s, goal):
     queue = PriorityQueue()
     queue.put((0, s))
     visited = set(s)
