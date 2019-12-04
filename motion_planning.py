@@ -117,8 +117,8 @@ class MotionPlanning(Drone):
     def plan_path(self):
         self.flight_state = States.PLANNING
         print("Searching for a path ...")
-        TARGET_ALTITUDE = 5
-        SAFETY_DISTANCE = 5
+        TARGET_ALTITUDE = 50
+        SAFETY_DISTANCE = 2
 
         self.target_position[2] = TARGET_ALTITUDE
 
@@ -141,34 +141,68 @@ class MotionPlanning(Drone):
         grid, north_offset, east_offset, edges = create_grid_and_edges(data, TARGET_ALTITUDE, SAFETY_DISTANCE)
         print("North offset = {0}, east offset = {1}".format(north_offset, east_offset))
         start = (-north_offset + local_pos[0], -east_offset + local_pos[1])
-       
-        min_node = np.array(edges[0][0])
-        min_dist = LA.norm(np.array(start) - np.array(min_node))
-        p0 = np.array(start)
-        G = nx.Graph()
-        for i in range(len(edges)):
-            p1 = np.array(edges[i][0])
-            p2 = np.array(edges[i][1])
-            hit = check_hit(grid, p0, p1)
-            if hit == False and min_dist > LA.norm(p0 - p1):
-                min_dist = LA.norm(p0 - np.array(p1))
-                min_node = (p1[0], p1[1])
-            if hit == False and min_dist > LA.norm(p0 - p2):
-                min_dist = LA.norm(p0 - np.array(p2))
-                min_node = (p2[0], p2[1])
 
-        edges.insert(0, (start, min_node))
-        for i in range(len(edges)):
-            e = edges[i]
-            # print('edge {0}, {1} --> {2}'.format(i, e[0], e[1]))
-            G.add_edge(e[0], e[1])
-
+        ## Pick a goal
+        # goal_lat = 37.793763
+        # goal_long = -122.396823
         path = []
-        while (len(path) < 1):
-            k = np.random.randint(1,len(edges))
-            goal = (edges[k][0][0], edges[k][0][1])
-            print('Local Start and Goal: ', start, goal)
-            path, _ = a_star2(G, heuristic, start, goal)
+        while len(path) < 2:            
+            goal_gps = np.array([-122.402238, 37.797067, TARGET_ALTITUDE])
+            # goal_gps = np.array([-122.396823, 37.793763, TARGET_ALTITUDE])
+            goal_local = global_to_local(goal_gps, self.global_home)
+            print('goal_local', goal_local)
+
+            goal = np.array((-north_offset + goal_local[0], -east_offset + goal_local[1]))
+            print('goal', goal)
+            noise = np.array((np.random.uniform(-100, 100), np.random.uniform(0, 200)))
+            print('noise', noise)
+
+            goal = goal + noise
+            print('Goal: ', goal)
+
+            # start2 is the other end inside the Vonoroi graph 
+            start2 = np.array(edges[0][0])
+            goal2 =   edges[0][1]
+
+            min_start_dist = 1000000.0
+            min_goal_dist =  1000000.0
+            p0 = np.array(start)
+            G = nx.Graph()        
+            for i in range(len(edges)):
+                p1 = np.array(edges[i][0])
+                p2 = np.array(edges[i][1])
+
+                hit = check_hit(grid, p0, p1)
+                if hit == False and min_start_dist > LA.norm(p0 - p1):
+                    min_start_dist = LA.norm(p0 - p1)
+                    start2 = (p1[0], p1[1])
+
+                hit = check_hit(grid, p0, p2)
+                if hit == False and min_start_dist > LA.norm(p0 - p2):
+                    min_start_dist = LA.norm(p0 - 2)
+                    start2 = (p2[0], p2[1])
+
+                hit = check_hit(grid, goal, p1)
+                # print('edge {0}, hit {1}, goal {2}, p1 {3}'.format(i, hit, goal, p1))
+                if hit == False and min_goal_dist > LA.norm(goal - p1):
+                    # print('min_goal_dist: ', min_goal_dist, ', goal2: ', goal2)
+                    min_goal_dist = LA.norm(goal - p1)
+                    goal2 = (p1[0], p1[1])
+                
+                hit = check_hit(grid, goal, p2)
+                # print('edge {0}, hit {1}, goal {2}, p2 {3}'.format(i, hit, goal, p1))
+                if hit == False and min_goal_dist > LA.norm(goal - p2):
+                    # print('min_goal_dist: ', min_goal_dist, ', goal2: ', goal2)
+                    min_goal_dist = LA.norm(goal - p2)
+                    goal2 = (p2[0], p2[1])
+
+            edges.insert(0, (start, start2))        
+            for i in range(len(edges)):
+                e = edges[i]            
+                G.add_edge(e[0], e[1])
+
+            print('Local Start and Goal: ', start, goal2)
+            path, _ = a_star2(G, heuristic, start, goal2)
             
         # Convert path to waypoints
         waypoints = [[ int(p[0] + north_offset), int(p[1] + east_offset), TARGET_ALTITUDE, 0] for p in path]
