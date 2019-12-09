@@ -6,7 +6,7 @@ from enum import Enum, auto
 import numpy as np
 import numpy.linalg as LA
 
-from planning_utils import a_star, heuristic, create_grid_and_edges, check_hit
+from planning_utils import Roadmap
 from udacidrone import Drone
 from udacidrone.connection import MavlinkConnection
 from udacidrone.messaging import MsgID
@@ -138,44 +138,18 @@ class MotionPlanning(Drone):
             self.local_position))
 
         data = np.loadtxt('colliders.csv', delimiter=',', dtype='Float64', skiprows=2)
-        
-        # Define a grid for a particular altitude and safety margin around obstacles
-        grid, north_offset, east_offset, edges = create_grid_and_edges(data, TARGET_ALTITUDE, SAFETY_DISTANCE)
+        map = Roadmap(data, 20)
+        map.create_graph(500, 7)
+
+        north_offset, east_offset = map.map_offsets()
         print("North offset = {0}, east offset = {1}".format(north_offset, east_offset))
         start = (-north_offset + local_pos[0], -east_offset + local_pos[1])
+        goal_gps = np.array([GOAL_LON, GOAL_LAT, TARGET_ALTITUDE])
+        goal_local = global_to_local(goal_gps, self.global_home)
+        goal = (-north_offset + goal_local[0], -east_offset + goal_local[1])
 
-        path = []
-        while len(path) < 3:            
-            goal_gps = np.array([GOAL_LON, GOAL_LAT, TARGET_ALTITUDE])
-            goal_local = global_to_local(goal_gps, self.global_home)
-            print('goal_local', goal_local)
-            
-            noise = (np.random.uniform(-100, 100), np.random.uniform(0, 200))
-            goal = (-north_offset + goal_local[0] + noise[0], -east_offset + goal_local[1] + noise[1])
-            print('noise', noise, 'Goal: ', goal)
-
-            newEdges = []
-            for e in edges:
-                p1 = e[0]
-                p2 = e[1]
-
-                if check_hit(grid, np.array(start), np.array(p1)) == False:
-                    newEdges.append((start, p1))
-                if check_hit(grid, np.array(start), np.array(p2)) == False:
-                    newEdges.append((start, p2))
-                if check_hit(grid, np.array(p1), np.array(goal)) == False:
-                    newEdges.append((p1, goal)) 
-                if check_hit(grid, np.array(p2), np.array(goal)) == False:
-                    newEdges.append((p2, goal))
-
-            G = nx.Graph()
-            for e1 in edges:
-                G.add_edge(e1[0], e1[1])
-            for e2 in newEdges:
-                G.add_edge(e2[0], e2[1])
-
-            print('Local Start and Goal: ', start, goal)
-            path, _ = a_star(G, heuristic, start, goal)
+        print('Local Start and Goal: ', start, goal)
+        path, _ = map.a_star(start, goal)
 
         # Convert path to waypoints
         waypoints = [[ int(p[0] + north_offset), int(p[1] + east_offset), TARGET_ALTITUDE, 0] for p in path]

@@ -55,16 +55,27 @@ class Roadmap:
         self._max_poly_xy = 2 * np.max((data[:, 3], data[:, 4]))
         centers = np.array([p.center for p in self._polygons])
         self._tree = KDTree(centers, metric='euclidean')
+        self._G = nx.Graph()
+
+    def map_offsets(self):
+        return int(self._xmin), int(self._ymin)
+
+    def distance(self, position, goal_position):
+        return LA.norm(np.array(position) - np.array(goal_position))
+
+    def can_connect(self, p1, p2):
+        ls = LineString([p1, p2])
+        for p in self._polygons:
+            if p.crosses(ls) and min(p1[2], p2[2]) < p.height:
+                return False
+        return True
 
     def extract_polygons(self):
         for i in range(self._data.shape[0]):
             north, east, alt, d_north, d_east, d_alt = self._data[i, :]
             obstacle = [north - d_north, north + d_north, east - d_east, east + d_east]
             corners = [(obstacle[0], obstacle[2]), (obstacle[0], obstacle[3]), (obstacle[1], obstacle[3]), (obstacle[1], obstacle[2])]
-            
-            # TODO: Compute the height of the polygon
             height = alt + d_alt
-
             p = Poly(corners, height)
             self._polygons.append(p)
 
@@ -86,28 +97,55 @@ class Roadmap:
                     in_collision = True
             if not in_collision:
                 pts.append(s)
-                
+
         return pts
 
-    def can_connect(self, p1, p2):
-        ls = LineString([p1, p2])
-        for p in self._polygons:
-            if p.crosses(ls) and min(p1[2], p2[2]) < p.height:
-                return False
-        return True
-
-    ## points is list of shapely.geometry.Point(s)
-    # k is int param
     def create_graph(self, num_samples, k):
         points = sample(num_samples)
-        g = nx.Graph()
         tree = KDTree(points)
         for p in points:
             neighbor_idxs = tree.query([p], k, return_distance=False)[0]
             for i in neighbor_idxs:
                 if p !=  points[i] and can_connect(p, points[i]):
-                    g.add_edge(p, points[i], weight = LA.norm(np.array(p) - np.array(points[i])))
-        return g
+                    _G.add_edge(p, points[i], weight = self.distance(p, points[i]))
+        return _G
 
-    def heuristic(self, position, goal_position):
-        return np.linalg.norm(np.array(position) - np.array(goal_position))
+    def a_star(self, start, goal):
+        queue = PriorityQueue()
+        queue.put((0, start))
+        visited = set(start)
+        branch = {}
+        found = False
+
+        while not queue.empty():
+            x = queue.get()[1]
+            if x == start:
+                cost = 0.0
+            else:
+                cost = branch[x][0]
+
+            if x == goal:
+                found = True
+                break
+            else:
+                for y in _G[x]:
+                    if y not in visited:
+                        y_cost = cost + self.distance(x, y)
+                        est_cost = y_cost + self.distance(y, goal)
+                        branch[y] = (y_cost, x)
+                        queue.put((est_cost, y))
+
+        path = []
+        cost = 0
+        if found:
+            # retrace
+            n = goal
+            cost = branch[n][0]
+            path.append(goal)
+            while branch[n][1] != start:
+                path.append(branch[n][1])
+                n = branch[n][1]
+            path.append(start)
+        else:
+            print('Failed to find path!')
+        return path[::-1], cost
