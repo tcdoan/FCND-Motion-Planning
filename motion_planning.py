@@ -129,30 +129,29 @@ class MotionPlanning(Drone):
         lat0, lon0 = float(lat), float(lon)            
         self.set_home_position(lon0, lat0, 0)
         
-        local_pos = global_to_local(self.global_position, self.global_home)
-        print('local pos {0}'.format(local_pos))
-
-        print('global home {0}, position {1}, local position {2}'.format(
-            self.global_home, 
-            self.global_position,
-            self.local_position))
-
+        start = global_to_local(self.global_position, self.global_home)
+        print('global home {0}, global position {1}, local position {2}, start {3}'.format(self.global_home, self.global_position, self.local_position, start))
         data = np.loadtxt('colliders.csv', delimiter=',', dtype='Float64', skiprows=2)
         map = Roadmap(data, 20)
-        map.create_graph(500, 7)
+        map.create_graph(300, 7)
+        start_neighbors = map.query_close_points(start,5)
+        for x in start_neighbors:
+            if map.can_connect(start, x):
+                map.add_edge(start,x)
 
-        north_offset, east_offset = map.map_offsets()
-        print("North offset = {0}, east offset = {1}".format(north_offset, east_offset))
-        start = (-north_offset + local_pos[0], -east_offset + local_pos[1])
         goal_gps = np.array([GOAL_LON, GOAL_LAT, TARGET_ALTITUDE])
-        goal_local = global_to_local(goal_gps, self.global_home)
-        goal = (-north_offset + goal_local[0], -east_offset + goal_local[1])
+        goal = global_to_local(goal_gps, self.global_home)
+        goal_neighbors = map.query_close_points(goal,5)
+        for y in goal_neighbors:
+            if map.can_connect(y, goal):
+                map.add_edge(y, goal)
 
-        print('Local Start and Goal: ', start, goal)
+        print('Start finding path from {0} to {1} '.format(start, goal))
         path, _ = map.a_star(start, goal)
 
         # Convert path to waypoints
-        waypoints = [[ int(p[0] + north_offset), int(p[1] + east_offset), TARGET_ALTITUDE, 0] for p in path]
+        map.map_offsets()
+        waypoints = [[ int(p[0]), int(p[1]), TARGET_ALTITUDE, 0] for p in path]
         for wp in waypoints:
             print('north: ', wp[0], 'east: ', wp[1])
 
@@ -173,5 +172,4 @@ if __name__ == "__main__":
     conn = MavlinkConnection('tcp:{0}:{1}'.format(args.host, args.port), timeout=60)
     drone = MotionPlanning(conn)
     time.sleep(1)
-
     drone.start()

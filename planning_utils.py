@@ -1,12 +1,9 @@
 import sys
 import pkg_resources
-
-# pkg_resources.require("networkx==2.1")
 import networkx as nx
 import numpy as np
 import numpy.linalg as LA
 from sklearn.neighbors import KDTree
-from shapely.geometry import Polygon, Point
 from shapely.geometry import Polygon, Point, LineString
 from queue import PriorityQueue
 import matplotlib.pyplot as plt
@@ -42,8 +39,12 @@ class Poly:
 
 class Roadmap:
     def __init__(self, data, zmax):
+        print('creating Roadmap with altitute {0}'.format(zmax))
         self._data = data
-        extract_polygons()
+        self._polygons = []
+        print('Extracting polygons'.format(zmax))
+        self.extract_polygons()
+        print('Extracted {0} polygons'.format(len(self._polygons)))
         self._xmin = np.min(data[:, 0] - data[:, 3])
         self._xmax = np.max(data[:, 0] + data[:, 3])
 
@@ -54,7 +55,10 @@ class Roadmap:
         self._zmax = zmax
         self._max_poly_xy = 2 * np.max((data[:, 3], data[:, 4]))
         centers = np.array([p.center for p in self._polygons])
+
+        print('building obstacle tree with {0}'.format(len(centers)))
         self._tree = KDTree(centers, metric='euclidean')
+        self._gtree = None
         self._G = nx.Graph()
 
     def map_offsets(self):
@@ -101,14 +105,29 @@ class Roadmap:
         return pts
 
     def create_graph(self, num_samples, k):
-        points = sample(num_samples)
+        print("creating graph with a sample of {0} points and k = {1}".format(num_samples, k))
+        points = self.sample(num_samples)
         tree = KDTree(points)
+        print("KDTree created with {0} points".format(len(points)))
         for p in points:
             neighbor_idxs = tree.query([p], k, return_distance=False)[0]
             for i in neighbor_idxs:
-                if p !=  points[i] and can_connect(p, points[i]):
-                    _G.add_edge(p, points[i], weight = self.distance(p, points[i]))
-        return _G
+                if p !=  points[i] and self.can_connect(p, points[i]):
+                    self._G.add_edge(p, points[i], weight = self.distance(p, points[i]))
+                    print("Adding edge {0} to {1}".format(p, points[i]))
+        nodes = list(self._G.nodes())
+        self._gtree = KDTree(nodes)
+        print("Done building query tree _gtree with {0} nodes".format(len(nodes)))
+        return self._G
+
+    def add_edge(self, p1, p2):
+        self._G.add_edge(p1, p2, weight = self.distance(p1, p2))
+
+    def query_close_points(self, p, k):
+        idxs = self._gtree.query([p], k, return_distance=False)[0]
+        nodes = list(self._G.node())
+        points = [nodes[x] for x in idxs]
+        return points
 
     def a_star(self, start, goal):
         queue = PriorityQueue()
