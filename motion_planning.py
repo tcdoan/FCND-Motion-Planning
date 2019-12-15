@@ -13,6 +13,7 @@ from udacidrone.messaging import MsgID
 from udacidrone.frame_utils import global_to_local
 import pkg_resources
 import networkx as nx
+import matplotlib.pyplot as plt
 
 class States(Enum):
     MANUAL = auto()
@@ -146,7 +147,7 @@ class MotionPlanning(Drone):
         start = (-north_offset + local_pos[0], -east_offset + local_pos[1])
 
         path = []
-        while len(path) < 3:            
+        while True:
             goal_gps = np.array([GOAL_LON, GOAL_LAT, TARGET_ALTITUDE])
             goal_local = global_to_local(goal_gps, self.global_home)
             print('goal_local', goal_local)
@@ -179,8 +180,15 @@ class MotionPlanning(Drone):
             for e2 in newEdges:
                 G.add_edge(e2[0], e2[1])
 
-            print('Local Start and Goal: ', start, goal)
-            path, _ = a_star(G, heuristic, start, goal)
+            path, cost = a_star(G, heuristic, start, goal)
+            # vi = int(input('Enter 1 to visualize the graph. Enter 0 otherwise: '))
+            # if vi == 1:
+            #     self.visualize(grid, edges, newEdges, start, goal)
+
+            if len(path) > 3:
+                print('Found a path from start {0} to goal {1}'.format(start, goal))
+                print(path)                
+                break
 
         # Convert path to waypoints
         waypoints = [[ int(p[0] + north_offset), int(p[1] + east_offset), TARGET_ALTITUDE, 0] for p in path]
@@ -189,6 +197,24 @@ class MotionPlanning(Drone):
 
         self.waypoints = waypoints
         self.send_waypoints()
+
+    def visualize(self, grid, edges, newEdges, start, goal):
+        plt.rcParams["figure.figsize"] = [12, 12]
+        plt.imshow(grid, origin='lower', cmap='Greys') 
+
+        for e in edges:
+            p1 = e[0]
+            p2 = e[1]
+            plt.plot([p1[1], p2[1]], [p1[0], p2[0]], 'b-')
+
+        for e in newEdges:
+            p1 = e[0]
+            p2 = e[1]
+            plt.plot([p1[1], p2[1]], [p1[0], p2[0]], 'r-')
+
+        plt.xlabel('EAST  - start {0}'.format(start))
+        plt.ylabel('NORTH - goal  {0}'.format(goal))
+        plt.show()
 
     def start(self):
         self.start_log("Logs", "NavLog.txt")
