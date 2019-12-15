@@ -32,10 +32,13 @@ class MotionPlanning(Drone):
         self.waypoints = []
         self.in_mission = True
         self.check_state = {}
+        self.map = None
+        self.start = None
+        self.goal = None
 
         # initial state
         self.flight_state = States.MANUAL
-
+        self.create_map()
         # register all your callbacks here
         self.register_callback(MsgID.LOCAL_POSITION, self.local_position_callback)
         self.register_callback(MsgID.LOCAL_VELOCITY, self.velocity_callback)
@@ -113,48 +116,50 @@ class MotionPlanning(Drone):
         data = msgpack.dumps(self.waypoints)
         self.connection._master.write(data)
 
-    def plan_path(self):
-        #  GOAL [-122.396823, 37.793763, TARGET_ALTITUDE]
-        self.flight_state = States.PLANNING
-        print("Searching for a path ...")
-        TARGET_ALTITUDE = 5
-        SAFETY_DISTANCE = 5
-        GOAL_LAT = 37.797067
-        GOAL_LON = -122.402238
-
-        self.target_position[2] = TARGET_ALTITUDE
-
+    def create_map(self):
         colliders = open('colliders.csv', 'r')
         _, lat, _, lon = colliders.readline().replace(',', ' ') .split()
         lat0, lon0 = float(lat), float(lon)            
         self.set_home_position(lon0, lat0, 0)
-        
-        start = global_to_local(self.global_position, self.global_home)
-        print('global home {0}, global position {1}, local position {2}, start {3}'.format(self.global_home, self.global_position, self.local_position, start))
         data = np.loadtxt('colliders.csv', delimiter=',', dtype='Float64', skiprows=2)
-        map = Roadmap(data, 20)
-        map.create_graph(300, 7)
-        start_neighbors = map.query_close_points(start,5)
+        self.map = Roadmap(data, 20)
+        self.map.create_graph(300, 7)
+
+    def plan_path(self):
+        #  GOAL [-122.396823, 37.793763, TARGET_ALTITUDE]
+        self.flight_state = States.PLANNING
+        TARGET_ALTITUDE = 5
+        SAFETY_DISTANCE = 5
+        GOAL_LAT = 37.797067
+        GOAL_LON = -122.402238
+        self.target_position[2] = TARGET_ALTITUDE
+        start_ = global_to_local(self.global_position, self.global_home)
+        self.start = (start_[0], start_[1], start_[2])
+        print('global home {0}, global position {1}, local position {2}, start {3}'.format(self.global_home, self.global_position, self.local_position, self.start))
+        start_neighbors = self.map.query_close_points(self.start, 5)
+        print('start_neighbors  {0}'.format(start_neighbors))
         for x in start_neighbors:
-            if map.can_connect(start, x):
-                map.add_edge(start,x)
+            if self.map.can_connect(self.start, x):
+                print('Adding edge from start {0} to {1}'.format(self.start, x))
+                self.map.add_edge(self.start, x)
 
         goal_gps = np.array([GOAL_LON, GOAL_LAT, TARGET_ALTITUDE])
-        goal = global_to_local(goal_gps, self.global_home)
-        goal_neighbors = map.query_close_points(goal,5)
+        goal_ = global_to_local(goal_gps, self.global_home)
+        self.goal = (goal_[0], goal_[1], goal_[2])
+        goal_neighbors = self.map.query_close_points(self.goal,5)
         for y in goal_neighbors:
-            if map.can_connect(y, goal):
-                map.add_edge(y, goal)
+            if self.map.can_connect(y, self.goal):
+                print('Adding edge from {0} to goal {1}'.format(y, self.goal))
+                self.map.add_edge(y, self.goal)
 
-        print('Start finding path from {0} to {1} '.format(start, goal))
-        path, _ = map.a_star(start, goal)
+        print('Searching for a path from {0} to {1} '.format(self.start, self.goal))
+        path, _ = self.map.a_star(self.start, self.goal)
 
         # Convert path to waypoints
-        map.map_offsets()
-        waypoints = [[ int(p[0]), int(p[1]), TARGET_ALTITUDE, 0] for p in path]
+        self.map.map_offsets()
+        waypoints = [[ int(p[0]), int(p[1]), self.target_position[2], 0] for p in path]
         for wp in waypoints:
             print('north: ', wp[0], 'east: ', wp[1])
-
         self.waypoints = waypoints
         self.send_waypoints()
 
